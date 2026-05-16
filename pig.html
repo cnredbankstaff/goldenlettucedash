@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="en" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guinea Pig Paradise</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+  <style>
+html, body { height: 100%; margin: 0; overflow: hidden; }
+* { font-family: 'Fredoka', sans-serif; }
+canvas { display: block; }
+.spawn-btn {
+  background: linear-gradient(135deg, #4ade80, #22c55e);
+  border: 3px solid #15803d;
+  box-shadow: 0 4px 0 #15803d, 0 6px 12px rgba(0,0,0,0.2);
+  transition: all 0.1s;
+}
+.spawn-btn:active {
+  box-shadow: 0 1px 0 #15803d;
+  transform: translateY(3px);
+}
+.spawn-btn:hover { background: linear-gradient(135deg, #86efac, #4ade80); }
+.ui-overlay { pointer-events: none; }
+.ui-overlay > * { pointer-events: auto; }
+.counter-pill {
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(8px);
+  border: 2px solid #fed7aa;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+}
+@media (max-width: 640px) {
+  .spawn-btn {
+    padding: 12px 16px !important;
+    font-size: 14px !important;
+    border-width: 2px !important;
+  }
+  .counter-pill {
+    padding: 8px 12px !important;
+  }
+  #counter {
+    font-size: 18px !important;
+  }
+  #titleLabel {
+    display: none !important;
+  }
+  .controls-hint {
+    font-size: 10px !important;
+    display: none;
+  }
+}
+</style>
+  <style>body { box-sizing: border-box; }</style>
+  <script src="/_sdk/data_sdk.js" type="text/javascript"></script>
+ </head>
+ <body class="h-full bg-amber-50">
+  <canvas id="gameCanvas"></canvas>
+  <div class="ui-overlay fixed inset-0 flex flex-col p-2 sm:p-3 z-10">
+   <div class="flex items-start justify-between gap-2 sm:gap-3 flex-wrap">
+    <button id="spawnBtn" class="spawn-btn text-white font-bold text-sm sm:text-lg px-3 sm:px-5 py-2 sm:py-3 rounded-xl sm:rounded-2xl flex items-center gap-1 sm:gap-2 select-none active:scale-95 transition-transform"> 🐹 <span class="hidden xs:inline">Spawn Guinea Pig</span><span class="xs:hidden">Spawn</span> </button>
+    <div class="counter-pill rounded-xl sm:rounded-2xl px-3 sm:px-4 py-2 flex items-center gap-1 sm:gap-2">
+     <span class="text-lg sm:text-2xl">🐹</span> <span id="counter" class="text-lg sm:text-xl font-bold text-amber-800">0</span> <span id="titleLabel" class="text-xs sm:text-sm text-amber-600 font-medium hidden sm:inline">Guinea Pig Paradise</span>
+    </div>
+   </div>
+   <div class="flex-1"></div>
+   <div class="text-center text-xs text-amber-700/60 font-medium pb-1 controls-hint"><span class="hidden sm:inline">WASD to pan · Scroll to zoom · </span>Click to spawn
+   </div>
+  </div>
+  <script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const counterEl = document.getElementById('counter');
+const titleEl = document.getElementById('titleLabel');
+
+// Config & SDK
+const defaultConfig = {
+  game_title: 'Guinea Pig Paradise',
+  background_color: '#fef3c7',
+  surface_color: '#ffffff',
+  text_color: '#78350f',
+  primary_action_color: '#22c55e',
+  secondary_action_color: '#f59e0b'
+};
+
+let config = { ...defaultConfig };
+
+function applyConfig(c) {
+  config = c;
+  titleEl.textContent = c.game_title || defaultConfig.game_title;
+}
+
+window.elementSdk.init({
+  defaultConfig,
+  onConfigChange: async (c) => applyConfig(c),
+  mapToCapabilities: (c) => ({
+    recolorables: [
+      { get: () => c.background_color || defaultConfig.background_color, set: v => { c.background_color = v; window.elementSdk.setConfig({ background_color: v }); }},
+      { get: () => c.surface_color || defaultConfig.surface_color, set: v => { c.surface_color = v; window.elementSdk.setConfig({ surface_color: v }); }},
+      { get: () => c.text_color || defaultConfig.text_color, set: v => { c.text_color = v; window.elementSdk.setConfig({ text_color: v }); }},
+      { get: () => c.primary_action_color || defaultConfig.primary_action_color, set: v => { c.primary_action_color = v; window.elementSdk.setConfig({ primary_action_color: v }); }},
+      { get: () => c.secondary_action_color || defaultConfig.secondary_action_color, set: v => { c.secondary_action_color = v; window.elementSdk.setConfig({ secondary_action_color: v }); }}
+    ],
+    borderables: [],
+    fontEditable: undefined,
+    fontSizeable: undefined
+  }),
+  mapToEditPanelValues: (c) => new Map([['game_title', c.game_title || defaultConfig.game_title]])
+});
+
+// Audio via Web Audio API
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playSqueak() {
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(800 + Math.random() * 600, audioCtx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(1200 + Math.random() * 400, audioCtx.currentTime + 0.08);
+  o.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.15);
+  g.gain.setValueAtTime(0.06, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + 0.2);
+}
+function playMunch() {
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'square';
+  o.frequency.setValueAtTime(200 + Math.random() * 100, audioCtx.currentTime);
+  g.gain.setValueAtTime(0.03, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + 0.1);
+}
+
+// Camera
+let cam = { x: 0, y: 0, zoom: 1 };
+const keys = {};
+document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+document.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  cam.zoom = Math.max(0.3, Math.min(3, cam.zoom - e.deltaY * 0.001));
+}, { passive: false });
+
+// World dimensions
+const W = 1600, H = 1000;
+
+// Cage furniture - static objects
+const furniture = [];
+function initFurniture() {
+  // Bedding patches
+  for (let i = 0; i < 6; i++) {
+    furniture.push({ type: 'bedding', x: 100 + Math.random() * (W-200), y: 100 + Math.random() * (H-200), w: 80 + Math.random()*60, h: 40 + Math.random()*20, color: ['#fde68a','#fed7aa','#fecaca','#d9f99d'][i%4] });
+  }
+  // Houses
+  furniture.push({ type: 'house', x: 120, y: 150, w: 120, h: 80 });
+  furniture.push({ type: 'house', x: W-260, y: H-200, w: 120, h: 80 });
+  furniture.push({ type: 'house', x: W/2-60, y: 100, w: 110, h: 75 });
+  // Tunnels
+  furniture.push({ type: 'tunnel', x: 400, y: 500, w: 140, h: 60 });
+  furniture.push({ type: 'tunnel', x: 900, y: 300, w: 140, h: 60 });
+  // Hay piles
+  furniture.push({ type: 'hay', x: 300, y: 800, r: 40 });
+  furniture.push({ type: 'hay', x: 1200, y: 200, r: 35 });
+  furniture.push({ type: 'hay', x: 700, y: 700, r: 45 });
+  // Food bowls
+  furniture.push({ type: 'bowl', x: 600, y: 150, r: 30 });
+  furniture.push({ type: 'bowl', x: 1000, y: 800, r: 30 });
+  // Water bottles
+  furniture.push({ type: 'water', x: 50, y: 500 });
+  furniture.push({ type: 'water', x: W-70, y: 400 });
+  // Ramps
+  furniture.push({ type: 'ramp', x: 250, y: 350, w: 100, h: 50 });
+  furniture.push({ type: 'ramp', x: 1100, y: 600, w: 100, h: 50 });
+  // Chew toys
+  furniture.push({ type: 'toy', x: 500, y: 400, r: 15 });
+  furniture.push({ type: 'toy', x: 1300, y: 500, r: 15 });
+  // Blankets
+  furniture.push({ type: 'blanket', x: 800, y: 450, w: 100, h: 70 });
+}
+initFurniture();
+
+// Particles
+const particles = [];
+for (let i = 0; i < 30; i++) {
+  particles.push({ x: Math.random()*W, y: Math.random()*H, vy: -0.1 - Math.random()*0.2, vx: (Math.random()-0.5)*0.3, size: 1+Math.random()*2, alpha: 0.2+Math.random()*0.3 });
+}
+
+// Guinea pig colors/patterns
+const furColors = ['#8B4513','#D2691E','#F4A460','#FFFFFF','#333333','#FF8C00','#DEB887','#A0522D','#CD853F','#FFDAB9'];
+const patternTypes = ['solid','spotted','twoTone'];
+
+// Guinea pigs
+const pigs = [];
+const STATES = ['wander','eat','drink','sleep','tunnel','jump','zoomies','beg','relax','chase','idle'];
+
+function createPig() {
+  const baseColor = furColors[Math.floor(Math.random()*furColors.length)];
+  let secondColor = furColors[Math.floor(Math.random()*furColors.length)];
+  while (secondColor === baseColor) secondColor = furColors[Math.floor(Math.random()*furColors.length)];
+  const pattern = patternTypes[Math.floor(Math.random()*patternTypes.length)];
+  const pig = {
+    x: 200 + Math.random()*(W-400),
+    y: 200 + Math.random()*(H-400),
+    vx: 0, vy: 0,
+    baseColor, secondColor, pattern,
+    size: 18 + Math.random()*6,
+    state: 'wander',
+    stateTimer: 60 + Math.random()*120,
+    targetX: 0, targetY: 0,
+    dir: Math.random() > 0.5 ? 1 : -1,
+    noseWiggle: 0,
+    jumpY: 0,
+    eyeBlink: 0,
+    blinkTimer: 100 + Math.random()*200,
+    squeakTimer: 200 + Math.random()*500,
+    legAnim: 0,
+    happiness: 0.5 + Math.random()*0.5,
+    sleepZ: 0,
+    begging: false
+  };
+  pig.targetX = pig.x + (Math.random()-0.5)*300;
+  pig.targetY = pig.y + (Math.random()-0.5)*300;
+  return pig;
+}
+
+function pickNewState(pig) {
+  const r = Math.random();
+  if (r < 0.3) { pig.state = 'wander'; pig.stateTimer = 80+Math.random()*160; pickTarget(pig); }
+  else if (r < 0.4) { pig.state = 'eat'; pig.stateTimer = 100+Math.random()*80; moveToNearest(pig, 'hay'); }
+  else if (r < 0.47) { pig.state = 'drink'; pig.stateTimer = 60+Math.random()*40; moveToNearest(pig, 'water'); }
+  else if (r < 0.55) { pig.state = 'sleep'; pig.stateTimer = 200+Math.random()*200; moveToNearest(pig, 'house'); }
+  else if (r < 0.6) { pig.state = 'tunnel'; pig.stateTimer = 80+Math.random()*60; moveToNearest(pig, 'tunnel'); }
+  else if (r < 0.67) { pig.state = 'jump'; pig.stateTimer = 30+Math.random()*30; }
+  else if (r < 0.73) { pig.state = 'zoomies'; pig.stateTimer = 60+Math.random()*80; pig.vx = (Math.random()-0.5)*6; pig.vy = (Math.random()-0.5)*6; }
+  else if (r < 0.8) { pig.state = 'beg'; pig.stateTimer = 60+Math.random()*60; pig.begging = true; }
+  else if (r < 0.88) { pig.state = 'relax'; pig.stateTimer = 120+Math.random()*100; }
+  else if (r < 0.95 && pigs.length > 1) { pig.state = 'chase'; pig.stateTimer = 100+Math.random()*100; }
+  else { pig.state = 'idle'; pig.stateTimer = 40+Math.random()*60; }
+}
+
+function pickTarget(pig) {
+  pig.targetX = Math.max(40, Math.min(W-40, pig.x + (Math.random()-0.5)*400));
+  pig.targetY = Math.max(40, Math.min(H-40, pig.y + (Math.random()-0.5)*400));
+}
+
+function moveToNearest(pig, type) {
+  let best = null, bestD = Infinity;
+  for (const f of furniture) {
+    if (f.type === type) {
+      const d = Math.hypot(f.x - pig.x, (f.y||0) - pig.y);
+      if (d < bestD) { bestD = d; best = f; }
+    }
+  }
+  if (best) { pig.targetX = best.x + (best.w||0)/2; pig.targetY = best.y||best.y; }
+}
+
+function updatePig(pig, dt) {
+  pig.noseWiggle += 0.15;
+  pig.blinkTimer--;
+  if (pig.blinkTimer <= 0) { pig.eyeBlink = 6; pig.blinkTimer = 100+Math.random()*200; }
+  if (pig.eyeBlink > 0) pig.eyeBlink--;
+  pig.squeakTimer--;
+  if (pig.squeakTimer <= 0) { playSqueak(); pig.squeakTimer = 300+Math.random()*600; }
+
+  pig.stateTimer--;
+  if (pig.stateTimer <= 0) { pig.begging = false; pig.jumpY = 0; pickNewState(pig); }
+
+  const spd = pig.state === 'zoomies' ? 3 : pig.state === 'chase' ? 2.2 : 1;
+
+  switch(pig.state) {
+    case 'wander':
+    case 'eat':
+    case 'drink':
+    case 'sleep':
+    case 'tunnel': {
+      const dx = pig.targetX - pig.x, dy = pig.targetY - pig.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 5) {
+        pig.vx += (dx/d)*0.15*spd; pig.vy += (dy/d)*0.15*spd;
+        pig.dir = dx > 0 ? 1 : -1;
+        pig.legAnim += 0.12;
+      } else {
+        if (pig.state === 'eat' && pig.stateTimer % 20 === 0) playMunch();
+      }
+      break;
+    }
+    case 'jump':
+      pig.jumpY = Math.abs(Math.sin(pig.stateTimer * 0.2)) * 20;
+      break;
+    case 'zoomies':
+      pig.legAnim += 0.25;
+      if (pig.x < 40 || pig.x > W-40) pig.vx *= -1;
+      if (pig.y < 40 || pig.y > H-40) pig.vy *= -1;
+      pig.dir = pig.vx > 0 ? 1 : -1;
+      break;
+    case 'beg':
+      pig.begging = true;
+      break;
+    case 'chase': {
+      let closest = null, cd = Infinity;
+      for (const o of pigs) {
+        if (o === pig) continue;
+        const d = Math.hypot(o.x-pig.x, o.y-pig.y);
+        if (d < cd) { cd = d; closest = o; }
+      }
+      if (closest && cd > 30) {
+        const dx = closest.x-pig.x, dy = closest.y-pig.y;
+        const d = Math.hypot(dx,dy);
+        pig.vx += (dx/d)*0.2; pig.vy += (dy/d)*0.2;
+        pig.dir = dx > 0 ? 1 : -1;
+        pig.legAnim += 0.15;
+      }
+      break;
+    }
+    case 'relax':
+    case 'idle':
+      pig.vx *= 0.9; pig.vy *= 0.9;
+      break;
+  }
+
+  // Friction & movement
+  pig.vx *= 0.92; pig.vy *= 0.92;
+  pig.x += pig.vx; pig.y += pig.vy;
+  pig.x = Math.max(30, Math.min(W-30, pig.x));
+  pig.y = Math.max(30, Math.min(H-30, pig.y));
+
+  // Happiness near others
+  for (const o of pigs) {
+    if (o === pig) continue;
+    const d = Math.hypot(o.x-pig.x, o.y-pig.y);
+    if (d < 60 && d > 0) {
+      pig.happiness = Math.min(1, pig.happiness + 0.001);
+      // Gentle push
+      if (d < 30) {
+        const dx = pig.x-o.x, dy = pig.y-o.y;
+        pig.vx += dx/d*0.3; pig.vy += dy/d*0.3;
+      }
+    }
+  }
+}
+
+// Drawing
+function drawFurniture() {
+  for (const f of furniture) {
+    switch(f.type) {
+      case 'bedding':
+        ctx.fillStyle = f.color;
+        ctx.beginPath();
+        ctx.ellipse(f.x, f.y, f.w/2, f.h/2, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.strokeStyle = '#00000010';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        break;
+      case 'house':
+        // Body
+        ctx.fillStyle = '#c2410c';
+        ctx.beginPath();
+        ctx.roundRect(f.x, f.y+20, f.w, f.h-20, 8);
+        ctx.fill();
+        // Roof
+        ctx.fillStyle = '#9a3412';
+        ctx.beginPath();
+        ctx.moveTo(f.x-10, f.y+22);
+        ctx.lineTo(f.x+f.w/2, f.y-10);
+        ctx.lineTo(f.x+f.w+10, f.y+22);
+        ctx.closePath();
+        ctx.fill();
+        // Door
+        ctx.fillStyle = '#1c1917';
+        ctx.beginPath();
+        ctx.arc(f.x+f.w/2, f.y+f.h, 18, Math.PI, 0);
+        ctx.fill();
+        break;
+      case 'tunnel':
+        ctx.fillStyle = '#65a30d';
+        ctx.beginPath();
+        ctx.roundRect(f.x, f.y, f.w, f.h, 30);
+        ctx.fill();
+        ctx.fillStyle = '#1c1917';
+        ctx.beginPath();
+        ctx.arc(f.x+10, f.y+f.h/2, 20, 0, Math.PI*2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(f.x+f.w-10, f.y+f.h/2, 20, 0, Math.PI*2);
+        ctx.fill();
+        break;
+      case 'hay':
+        ctx.fillStyle = '#eab308';
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, f.r, 0, Math.PI*2);
+        ctx.fill();
+        // Strands
+        ctx.strokeStyle = '#ca8a04';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 5; i++) {
+          const a = i*1.2;
+          ctx.beginPath();
+          ctx.moveTo(f.x-f.r*0.5+i*8, f.y-f.r*0.3);
+          ctx.lineTo(f.x-f.r*0.3+i*8, f.y+f.r*0.4);
+          ctx.stroke();
+        }
+        break;
+      case 'bowl':
+        ctx.fillStyle = '#a16207';
+        ctx.beginPath();
+        ctx.ellipse(f.x, f.y, f.r, f.r*0.5, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = '#7c6f3b';
+        ctx.beginPath();
+        ctx.ellipse(f.x, f.y-3, f.r-5, f.r*0.35, 0, 0, Math.PI*2);
+        ctx.fill();
+        // Pellets
+        ctx.fillStyle = '#65a30d';
+        for (let i = 0; i < 4; i++) {
+          ctx.beginPath();
+          ctx.arc(f.x-8+i*6, f.y-4, 3, 0, Math.PI*2);
+          ctx.fill();
+        }
+        break;
+      case 'water':
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillRect(f.x, f.y, 20, 60);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(f.x+3, f.y+15, 14, 40);
+        ctx.fillStyle = '#60a5fa';
+        ctx.beginPath();
+        ctx.arc(f.x+10, f.y+62, 4, 0, Math.PI*2);
+        ctx.fill();
+        break;
+      case 'ramp':
+        ctx.fillStyle = '#a16207';
+        ctx.beginPath();
+        ctx.moveTo(f.x, f.y+f.h);
+        ctx.lineTo(f.x+f.w, f.y);
+        ctx.lineTo(f.x+f.w, f.y+f.h);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#78350f';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        break;
+      case 'toy':
+        ctx.fillStyle = '#e11d48';
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, f.r, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, f.r*0.5, 0, Math.PI*2);
+        ctx.fill();
+        break;
+      case 'blanket':
+        ctx.fillStyle = '#c084fc';
+        ctx.globalAlpha = 0.6;
+        ctx.beginPath();
+        ctx.roundRect(f.x, f.y, f.w, f.h, 12);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        break;
+    }
+  }
+}
+
+function drawPig(pig) {
+  ctx.save();
+  ctx.translate(pig.x, pig.y - pig.jumpY);
+
+  const s = pig.size;
+  const sleeping = pig.state === 'sleep' && pig.stateTimer < 150;
+  const begging = pig.begging;
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.1)';
+  ctx.beginPath();
+  ctx.ellipse(0, s*0.6+pig.jumpY, s*0.8, s*0.2, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.scale(pig.dir, 1);
+
+  // Legs
+  const legOff = Math.sin(pig.legAnim)*3;
+  ctx.fillStyle = pig.baseColor;
+  if (!begging) {
+    ctx.beginPath(); ctx.ellipse(-s*0.4, s*0.4+legOff, 5, 7, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(s*0.4, s*0.4-legOff, 5, 7, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-s*0.15, s*0.45-legOff, 4, 6, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(s*0.2, s*0.45+legOff, 4, 6, 0, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Body
+  ctx.fillStyle = pig.baseColor;
+  if (begging) {
+    ctx.beginPath();
+    ctx.ellipse(0, -s*0.1, s*0.5, s*0.7, 0, 0, Math.PI*2);
+    ctx.fill();
+  } else if (sleeping) {
+    ctx.beginPath();
+    ctx.ellipse(0, s*0.1, s*0.7, s*0.35, 0, 0, Math.PI*2);
+    ctx.fill();
+  } else {
+    ctx.beginPath();
+    ctx.ellipse(0, 0, s*0.7, s*0.45, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // Pattern
+  if (pig.pattern === 'spotted') {
+    ctx.fillStyle = pig.secondColor;
+    ctx.beginPath(); ctx.arc(-s*0.2, -s*0.1, s*0.15, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(s*0.15, s*0.1, s*0.12, 0, Math.PI*2); ctx.fill();
+  } else if (pig.pattern === 'twoTone') {
+    ctx.fillStyle = pig.secondColor;
+    ctx.beginPath();
+    ctx.ellipse(s*0.2, 0, s*0.35, s*0.4, 0, -Math.PI/2, Math.PI/2);
+    ctx.fill();
+  }
+
+  // Head
+  const headY = begging ? -s*0.65 : sleeping ? -s*0.05 : -s*0.2;
+  const headX = begging ? 0 : s*0.45;
+  ctx.fillStyle = pig.baseColor;
+  ctx.beginPath();
+  ctx.ellipse(headX, headY, s*0.35, s*0.3, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Ears
+  ctx.fillStyle = '#d97706';
+  ctx.beginPath(); ctx.ellipse(headX-s*0.2, headY-s*0.25, 6, 8, -0.3, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(headX+s*0.2, headY-s*0.25, 6, 8, 0.3, 0, Math.PI*2); ctx.fill();
+
+  // Eyes
+  if (sleeping) {
+    ctx.strokeStyle = '#1c1917';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(headX-7, headY-2); ctx.lineTo(headX-2, headY); ctx.lineTo(headX-7, headY+2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(headX+3, headY-2); ctx.lineTo(headX+8, headY); ctx.lineTo(headX+3, headY+2); ctx.stroke();
+  } else if (pig.eyeBlink > 0) {
+    ctx.strokeStyle = '#1c1917';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(headX-9, headY-2); ctx.lineTo(headX-3, headY-2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(headX+3, headY-2); ctx.lineTo(headX+9, headY-2); ctx.stroke();
+  } else {
+    ctx.fillStyle = '#1c1917';
+    ctx.beginPath(); ctx.arc(headX-6, headY-3, 2.5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(headX+6, headY-3, 2.5, 0, Math.PI*2); ctx.fill();
+    // Eye shine
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(headX-5, headY-4, 1, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(headX+7, headY-4, 1, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Nose
+  const nw = Math.sin(pig.noseWiggle)*1.5;
+  ctx.fillStyle = '#f472b6';
+  ctx.beginPath();
+  ctx.ellipse(headX+s*0.28+nw, headY+3, 4, 3, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Mouth
+  if (pig.state === 'eat') {
+    ctx.fillStyle = '#1c1917';
+    ctx.beginPath();
+    ctx.arc(headX+s*0.25, headY+9, 3, 0, Math.PI);
+    ctx.fill();
+  }
+
+  // Sleeping Z's
+  if (sleeping) {
+    pig.sleepZ += 0.03;
+    ctx.fillStyle = '#60a5fa';
+    ctx.font = `${10+Math.sin(pig.sleepZ)*3}px Fredoka`;
+    ctx.fillText('z', headX+15, headY-15-Math.sin(pig.sleepZ)*10);
+    ctx.font = `${7+Math.sin(pig.sleepZ+1)*2}px Fredoka`;
+    ctx.fillText('z', headX+25, headY-25-Math.sin(pig.sleepZ+1)*8);
+  }
+
+  // Begging paws
+  if (begging) {
+    ctx.fillStyle = pig.baseColor;
+    ctx.beginPath(); ctx.ellipse(-s*0.25, -s*0.35, 5, 7, -0.4, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(s*0.25, -s*0.35, 5, 7, 0.4, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Happy heart when near others
+  if (pig.happiness > 0.8 && Math.random() < 0.02) {
+    pig.happiness = 0.6;
+  }
+
+  ctx.restore();
+}
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  cam.x = W/2 - canvas.width/(2*cam.zoom);
+  cam.y = H/2 - canvas.height/(2*cam.zoom);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Spawn button
+document.getElementById('spawnBtn').addEventListener('click', () => {
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  pigs.push(createPig());
+  counterEl.textContent = pigs.length;
+  playSqueak();
+});
+
+// Touch controls for mobile
+let touchStartX = 0, touchStartY = 0;
+canvas.addEventListener('touchstart', (e) => {
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+}, { passive: true });
+
+canvas.addEventListener('touchmove', (e) => {
+  const dx = e.touches[0].clientX - touchStartX;
+  const dy = e.touches[0].clientY - touchStartY;
+  
+  // Pan with two-finger drag
+  if (e.touches.length === 2) {
+    cam.x -= dx * 0.02 / cam.zoom;
+    cam.y -= dy * 0.02 / cam.zoom;
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }
+  
+  // Pinch zoom
+  if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const distance = Math.hypot(dx, dy);
+    if (window.lastPinchDistance) {
+      const scale = distance / window.lastPinchDistance;
+      cam.zoom = Math.max(0.3, Math.min(3, cam.zoom * scale));
+    }
+    window.lastPinchDistance = distance;
+  }
+}, { passive: true });
+
+canvas.addEventListener('touchend', () => {
+  window.lastPinchDistance = 0;
+}, { passive: true });
+
+// Main loop
+function update() {
+  // Camera
+  const camSpd = 5/cam.zoom;
+  if (keys['w'] || keys['arrowup']) cam.y -= camSpd;
+  if (keys['s'] || keys['arrowdown']) cam.y += camSpd;
+  if (keys['a'] || keys['arrowleft']) cam.x -= camSpd;
+  if (keys['d'] || keys['arrowright']) cam.x += camSpd;
+
+  // Update particles
+  for (const p of particles) {
+    p.x += p.vx; p.y += p.vy;
+    if (p.y < -10) { p.y = H+10; p.x = Math.random()*W; }
+  }
+
+  // Update pigs
+  for (const pig of pigs) updatePig(pig);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.scale(cam.zoom, cam.zoom);
+  ctx.translate(-cam.x, -cam.y);
+
+  // Cage background
+  ctx.fillStyle = '#fef9c3';
+  ctx.fillRect(0, 0, W, H);
+
+  // Cage border
+  ctx.strokeStyle = '#a16207';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(4, 4, W-8, H-8);
+
+  // Grid pattern for bedding texture
+  ctx.strokeStyle = '#fde68a50';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 30) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += 30) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Particles
+  for (const p of particles) {
+    ctx.fillStyle = `rgba(255,255,220,${p.alpha})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  drawFurniture();
+
+  // Sort pigs by y for depth
+  pigs.sort((a,b) => a.y - b.y);
+  for (const pig of pigs) drawPig(pig);
+
+  // Cage bars on top
+  ctx.strokeStyle = '#78350f80';
+  ctx.lineWidth = 3;
+  for (let x = 0; x < W; x += 50) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, H-6); ctx.lineTo(x, H); ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+gameLoop();
+
+// Center camera initially
+cam.x = W/2 - canvas.width/(2*cam.zoom);
+cam.y = H/2 - canvas.height/(2*cam.zoom);
+
+lucide.createIcons();
+</script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9fcc512ff597c2ef',t:'MTc3ODk1NDc5NS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
